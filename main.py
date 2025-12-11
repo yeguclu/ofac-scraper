@@ -93,44 +93,100 @@ def extract_content_data(url: str) -> tuple[List[str], List[str], List[str]]:
     for header in headers:
         header_text = header.get_text().lower().strip()
         
-        # Check for individuals added
-        if "individuals" in header_text and "added" in header_text:
+        # Check for individuals added (handle both "individual" and "individuals")
+        if ("individual" in header_text or "individuals" in header_text) and "added" in header_text:
             next_p = header.find_next("p")
             if next_p:
-                for a_tag in next_p.find_all("a"):
-                    text = a_tag.get_text().strip()
-                    if not text:
-                        continue
-                    parts = [p.strip() for p in text.split(",")]
-                    if len(parts) >= 2:
-                        name = clean_name(f"{parts[0]}, {parts[1]}")
-                        individuals_added.append(name)
+                # Try to find <a> tags first, if none exist, parse text directly
+                a_tags = next_p.find_all("a")
+                if a_tags:
+                    for a_tag in a_tags:
+                        text = a_tag.get_text().strip()
+                        if not text:
+                            continue
+                        parts = [p.strip() for p in text.split(",")]
+                        if len(parts) >= 2:
+                            name = clean_name(f"{parts[0]}, {parts[1]}")
+                            individuals_added.append(name)
+                else:
+                    # No <a> tags, parse the paragraph text directly
+                    # Extract name from the beginning: "LAST, First (additional info)"
+                    text = next_p.get_text().strip()
+                    if text:
+                        # Extract name before first opening parenthesis or semicolon
+                        # Format: "LAST, First (info)" or "LAST, First; address"
+                        name_match = re.match(r'^([^\(;]+?)(?:\s*\(|;|$)', text)
+                        if name_match:
+                            name_text = name_match.group(1).strip()
+                            # Remove trailing commas and clean up
+                            name_text = name_text.rstrip(',').strip()
+                            parts = [p.strip() for p in name_text.split(",")]
+                            if len(parts) >= 2:
+                                name = clean_name(f"{parts[0]}, {parts[1]}")
+                                if name:
+                                    individuals_added.append(name)
         
-        # Check for entities added
-        elif "entities" in header_text and "added" in header_text:
+        # Check for entities added (handle both "entity" and "entities")
+        elif ("entity" in header_text or "entities" in header_text) and "added" in header_text:
             next_p = header.find_next("p")
             if next_p:
-                for a_tag in next_p.find_all("a"):
-                    text = a_tag.get_text().strip()
-                    if not text:
-                        continue
-                    parts = [p.strip() for p in text.split(",")]
-                    if len(parts) >= 1:
-                        name = clean_name(parts[0])
-                        entities_added.append(name)
+                # Try to find <a> tags first, if none exist, parse text directly
+                a_tags = next_p.find_all("a")
+                if a_tags:
+                    for a_tag in a_tags:
+                        text = a_tag.get_text().strip()
+                        if not text:
+                            continue
+                        parts = [p.strip() for p in text.split(",")]
+                        if len(parts) >= 1:
+                            name = clean_name(parts[0])
+                            entities_added.append(name)
+                else:
+                    # No <a> tags, parse the paragraph text directly
+                    text = next_p.get_text().strip()
+                    if text:
+                        # Extract entity name before first opening parenthesis or semicolon
+                        name_match = re.match(r'^([^\(;]+?)(?:\s*\(|;|$)', text)
+                        if name_match:
+                            name_text = name_match.group(1).strip()
+                            # Remove trailing commas and clean up
+                            name_text = name_text.rstrip(',').strip()
+                            parts = [p.strip() for p in name_text.split(",")]
+                            if len(parts) >= 1:
+                                name = clean_name(parts[0])
+                                if name:
+                                    entities_added.append(name)
         
         # Check for deletions
-        elif "deletions" in header_text:
+        elif "deletions" in header_text or "deletion" in header_text:
             next_p = header.find_next("p")
             if next_p:
-                for a_tag in next_p.find_all("a"):
-                    text = a_tag.get_text().strip()
-                    if not text:
-                        continue
-                    parts = [p.strip() for p in text.split(",")]
-                    if len(parts) >= 2:
-                        name = clean_name(f"{parts[0]}, {parts[1]}")
-                        deletions.append(name)
+                # Try to find <a> tags first, if none exist, parse text directly
+                a_tags = next_p.find_all("a")
+                if a_tags:
+                    for a_tag in a_tags:
+                        text = a_tag.get_text().strip()
+                        if not text:
+                            continue
+                        parts = [p.strip() for p in text.split(",")]
+                        if len(parts) >= 2:
+                            name = clean_name(f"{parts[0]}, {parts[1]}")
+                            deletions.append(name)
+                else:
+                    # No <a> tags, parse the paragraph text directly
+                    text = next_p.get_text().strip()
+                    if text:
+                        # Extract name before first opening parenthesis or semicolon
+                        name_match = re.match(r'^([^\(;]+?)(?:\s*\(|;|$)', text)
+                        if name_match:
+                            name_text = name_match.group(1).strip()
+                            # Remove trailing commas and clean up
+                            name_text = name_text.rstrip(',').strip()
+                            parts = [p.strip() for p in name_text.split(",")]
+                            if len(parts) >= 2:
+                                name = clean_name(f"{parts[0]}, {parts[1]}")
+                                if name:
+                                    deletions.append(name)
     
     return individuals_added, entities_added, deletions
 
@@ -146,8 +202,10 @@ def query_ofac_search(name: str) -> List[dict]:
     
     with requests.Session() as session:
         try:
+            print(f"    GET {search_url}", file=sys.stderr)
             response = session.get(search_url, timeout=30)
             response.raise_for_status()
+            print(f"    Got search page (status {response.status_code})", file=sys.stderr)
         except requests.RequestException as e:
             print(f"Error fetching search page: {e}", file=sys.stderr)
             return results
@@ -182,9 +240,12 @@ def query_ofac_search(name: str) -> List[dict]:
         form_data["ctl00$MainContent$btnSearch"] = "Search"
         
         try:
+            print(f"    POST {search_url} (searching for: {name})", file=sys.stderr)
             response = session.post(search_url, data=form_data, timeout=30)
             response.raise_for_status()
+            print(f"    Got search results (status {response.status_code}, size {len(response.text)} bytes)", file=sys.stderr)
         except requests.RequestException as e:
+            print(f"    Error posting search: {e}", file=sys.stderr)
             return results
         
         # Parse results
@@ -259,8 +320,10 @@ def get_identification_details(detail_url: str) -> List[dict]:
     identifications = []
     
     try:
+        print(f"    GET {detail_url}", file=sys.stderr)
         response = requests.get(detail_url, timeout=30)
         response.raise_for_status()
+        print(f"    Got detail page (status {response.status_code}, size {len(response.text)} bytes)", file=sys.stderr)
     except requests.RequestException as e:
         print(f"Error fetching detail page {detail_url}: {e}", file=sys.stderr)
         return identifications
@@ -343,6 +406,145 @@ def load_existing_names(csv_path: str = "data.csv") -> Set[str]:
         print(f"Error reading {csv_path}: {e}", file=sys.stderr)
     
     return names
+
+
+def get_last_processed_date(log_path: str = "log.txt", csv_path: str = "data.csv") -> datetime:
+    """Get the last processed date from log.txt or data.csv.
+    
+    Returns:
+        datetime object representing the last processed date, or None if not found
+    """
+    # First, try to read from log.txt
+    if os.path.exists(log_path):
+        try:
+            with open(log_path, 'r', encoding='utf-8') as f:
+                date_str = f.read().strip()
+                if date_str:
+                    return datetime.strptime(date_str, "%Y-%m-%d")
+        except Exception as e:
+            print(f"Warning: Error reading {log_path}: {e}", file=sys.stderr)
+    
+    # If log.txt doesn't exist or is empty, try data.csv
+    if os.path.exists(csv_path):
+        try:
+            with open(csv_path, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                last_date = None
+                for row in reader:
+                    date_str = row.get('date_added', '').strip()
+                    if date_str:
+                        try:
+                            date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+                            if last_date is None or date_obj > last_date:
+                                last_date = date_obj
+                        except ValueError:
+                            continue
+                if last_date:
+                    print(f"Using last date from {csv_path}: {last_date.date()}", file=sys.stderr)
+                    return last_date
+        except Exception as e:
+            print(f"Warning: Error reading {csv_path}: {e}", file=sys.stderr)
+    
+    return None
+
+
+def save_last_processed_date(date: datetime, log_path: str = "log.txt"):
+    """Save the last processed date to log.txt.
+    
+    Args:
+        date: datetime object to save
+        log_path: Path to the log file
+    """
+    try:
+        with open(log_path, 'w', encoding='utf-8') as f:
+            f.write(date.strftime("%Y-%m-%d"))
+        print(f"Saved last processed date to {log_path}: {date.date()}", file=sys.stderr)
+    except Exception as e:
+        print(f"Warning: Error saving to {log_path}: {e}", file=sys.stderr)
+
+
+def update_data_csv(changes: List[tuple], csv_path: str = "data.csv"):
+    """Update data.csv file based on changes, processing them in chronological order.
+    
+    Args:
+        changes: List of changes in chronological order, where each change is either:
+            - (date, name) for deletions
+            - (date, name, address) for additions
+        csv_path: Path to the CSV file
+    """
+    # Read existing data
+    rows = []
+    if os.path.exists(csv_path):
+        try:
+            with open(csv_path, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    rows.append(row)
+        except Exception as e:
+            print(f"Warning: Error reading {csv_path}: {e}", file=sys.stderr)
+            return
+    
+    # Process changes one by one in chronological order
+    deletions_count = 0
+    additions_count = 0
+    
+    for change in changes:
+        if len(change) == 2:
+            # Deletion: (date, name) - remove all rows with this name
+            name_to_delete = change[1].strip().lower()
+            original_count = len(rows)
+            rows = [row for row in rows if row.get('name', '').strip().lower() != name_to_delete]
+            removed = original_count - len(rows)
+            if removed > 0:
+                deletions_count += removed
+                print(f"Removed {removed} row(s) for deletion: {change[1]}", file=sys.stderr)
+        else:
+            # Addition: (date, name, address) - add new row only if it doesn't already exist
+            date_str = change[0].strftime("%Y-%m-%d")
+            address = change[2].lower().strip()
+            name = change[1].strip()
+            
+            # Check if this exact entry already exists (same date, address, and name)
+            already_exists = False
+            for row in rows:
+                existing_date = row.get('date_added', '').strip()
+                existing_address = row.get('address', '').lower().strip()
+                existing_name = row.get('name', '').strip()
+                
+                if (existing_date == date_str and 
+                    existing_address == address and 
+                    existing_name == name):
+                    already_exists = True
+                    break
+            
+            if not already_exists:
+                rows.append({
+                    'date_added': date_str,
+                    'address': change[2],
+                    'name': change[1]
+                })
+                additions_count += 1
+                print(f"Added row: {change[1]} - {change[2]}", file=sys.stderr)
+            else:
+                print(f"Skipped duplicate: {change[1]} - {change[2]}", file=sys.stderr)
+    
+    # Write back to CSV with all names quoted (to match original format)
+    try:
+        with open(csv_path, 'w', encoding='utf-8', newline='') as f:
+            # Write header
+            f.write('date_added,address,name\n')
+            for row in rows:
+                date_added = row.get('date_added', '')
+                address = row.get('address', '')
+                name = row.get('name', '')
+                # Escape quotes in name by doubling them (CSV standard)
+                escaped_name = name.replace('"', '""')
+                # Always quote the name field
+                f.write(f'{date_added},{address},"{escaped_name}"\n')
+        
+        print(f"Updated {csv_path}: {deletions_count} deletion(s), {additions_count} addition(s)", file=sys.stderr)
+    except Exception as e:
+        print(f"Error writing to {csv_path}: {e}", file=sys.stderr)
 
 
 def collect_content_pages(start_date: datetime, end_date: datetime) -> List[tuple[str, datetime]]:
@@ -436,7 +638,22 @@ def main():
         sys.exit(0 if success else 1)
     
     # Check argument count
-    if len(sys.argv) == 2:
+    if len(sys.argv) == 1:
+        # No arguments: use last processed date from log.txt or data.csv
+        last_date = get_last_processed_date()
+        if last_date is None:
+            print(f"Error: No previous date found. Please specify a start date.", file=sys.stderr)
+            print(f"\nUsage:", file=sys.stderr)
+            print(f"  {sys.argv[0]}                    # Continue from last processed date", file=sys.stderr)
+            print(f"  {sys.argv[0]} START_DATE        # Parse from START_DATE to now", file=sys.stderr)
+            print(f"  {sys.argv[0]} START_DATE END_DATE  # Parse from START_DATE to END_DATE", file=sys.stderr)
+            print(f"  {sys.argv[0]} --test            # Run test", file=sys.stderr)
+            sys.exit(1)
+        
+        start_date = last_date
+        end_date = datetime.now()
+        print(f"Continuing from last processed date: {start_date.date()}", file=sys.stderr)
+    elif len(sys.argv) == 2:
         # Single date: parse from that date to now
         try:
             start_date = datetime.strptime(sys.argv[1], "%Y-%m-%d")
@@ -447,6 +664,7 @@ def main():
         except ValueError:
             print(f"Invalid date format. Use YYYY-MM-DD", file=sys.stderr)
             print(f"\nUsage:", file=sys.stderr)
+            print(f"  {sys.argv[0]}                    # Continue from last processed date", file=sys.stderr)
             print(f"  {sys.argv[0]} START_DATE        # Parse from START_DATE to now", file=sys.stderr)
             print(f"  {sys.argv[0]} START_DATE END_DATE  # Parse from START_DATE to END_DATE", file=sys.stderr)
             print(f"  {sys.argv[0]} --test            # Run test", file=sys.stderr)
@@ -459,6 +677,7 @@ def main():
         except ValueError:
             print(f"Invalid date format. Use YYYY-MM-DD", file=sys.stderr)
             print(f"\nUsage:", file=sys.stderr)
+            print(f"  {sys.argv[0]}                    # Continue from last processed date", file=sys.stderr)
             print(f"  {sys.argv[0]} START_DATE        # Parse from START_DATE to now", file=sys.stderr)
             print(f"  {sys.argv[0]} START_DATE END_DATE  # Parse from START_DATE to END_DATE", file=sys.stderr)
             print(f"  {sys.argv[0]} --test            # Run test", file=sys.stderr)
@@ -469,6 +688,7 @@ def main():
             sys.exit(1)
     else:
         print(f"Usage:", file=sys.stderr)
+        print(f"  {sys.argv[0]}                    # Continue from last processed date", file=sys.stderr)
         print(f"  {sys.argv[0]} START_DATE        # Parse from START_DATE to now", file=sys.stderr)
         print(f"  {sys.argv[0]} START_DATE END_DATE  # Parse from START_DATE to END_DATE", file=sys.stderr)
         print(f"  {sys.argv[0]} --test            # Run test", file=sys.stderr)
@@ -489,10 +709,20 @@ def main():
         
         # Process individuals added
         for name in individuals_added:
+            print(f"  Querying search for individual: {name}", file=sys.stderr)
             search_results = query_ofac_search(name)
+            print(f"  Found {len(search_results)} search result(s) for {name}", file=sys.stderr)
             for result in search_results:
+                # Only process if the found name contains the query name (case-insensitive)
+                found_name = result.get('name', '').strip().lower()
+                query_name = name.strip().lower()
+                if query_name not in found_name:
+                    continue
+                
                 if result['detail_url']:
+                    print(f"  Fetching detail page: {result['detail_url']}", file=sys.stderr)
                     identifications = get_identification_details(result['detail_url'])
+                    print(f"  Found {len(identifications)} identification(s)", file=sys.stderr)
                     # should be eth addresses
                     eth_addresses = extract_eth_address(identifications)
                     if eth_addresses:
@@ -503,10 +733,20 @@ def main():
         
         # Process entities added
         for name in entities_added:
+            print(f"  Querying search for entity: {name}", file=sys.stderr)
             search_results = query_ofac_search(name)
+            print(f"  Found {len(search_results)} search result(s) for {name}", file=sys.stderr)
             for result in search_results:
+                # Only process if the found name contains the query name (case-insensitive)
+                found_name = result.get('name', '').strip().lower()
+                query_name = name.strip().lower()
+                if query_name not in found_name:
+                    continue
+                
                 if result['detail_url']:
+                    print(f"  Fetching detail page: {result['detail_url']}", file=sys.stderr)
                     identifications = get_identification_details(result['detail_url'])
+                    print(f"  Found {len(identifications)} identification(s)", file=sys.stderr)
                     eth_addresses = extract_eth_address(identifications)
                     if eth_addresses:
                         existing_names.add(name)
@@ -528,6 +768,12 @@ def main():
         else:
             # Addition: (date, name, address)
             print(f"Addition: {change[0]} - {change[1]} - {change[2]}")
+    
+    # Update data.csv with changes (processed in chronological order)
+    update_data_csv(changes)
+    
+    # Save the end_date (last processed date) to log.txt for next run
+    save_last_processed_date(end_date)
 
 if __name__ == "__main__":
     main()
